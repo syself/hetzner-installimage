@@ -28,9 +28,7 @@ jobs:
 
       - name: create a .tgz file 
         run: |
-          ls -la
-          pwd
-          tar czf /tmp/hetzner-install-image-${{ steps.tag.outputs.tag }}.tgz .
+          tar  --exclude .git -C .. -czf /tmp/hetzner-install-image-${{ steps.tag.outputs.tag }}.tgz hetzner-installimage
 
       - name: upload artifact
         uses: actions/upload-artifact@v3
