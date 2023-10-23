@@ -28,12 +28,12 @@ jobs:
 
       - name: create a .tgz file 
         run: |
-          tar  --exclude .git -C .. -czf /tmp/hetzner-install-image-${{ steps.tag.outputs.tag }}.tgz hetzner-installimage
+          tar  --exclude .git -C .. -czf /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz hetzner-installimage
 
       - name: upload artifact
         uses: actions/upload-artifact@v3
         with:
-          path: /tmp/hetzner-install-image-${{ steps.tag.outputs.tag }}.tgz             
+          path: /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz
 
 
       - name: upload release assets 
@@ -41,4 +41,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ steps.tag.outputs.tag }} -t ${{ steps.tag.outputs.tag }} -n ""
-          gh release upload ${{ steps.tag.outputs.tag }}  /tmp/hetzner-install-image-${{ steps.tag.outputs.tag }}.tgz 
+          gh release upload ${{ steps.tag.outputs.tag }}  /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz 
