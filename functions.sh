@@ -153,6 +153,20 @@ generate_menu() {
     ;;
   esac
 
+  # remove still beta images unless menu is Other
+  if [[ "$1" != 'Other' ]]; then
+    local image beta_image new_rawlist=()
+    while read image; do
+      for beta_image in "${IMAGE_STILL_BETA_OVERRIDES[@]}"; do
+        if [[ "$image" == "$beta_image" ]]; then
+          continue 2
+        fi
+      done
+      new_rawlist+=("$image")
+    done <<< "$RAWLIST"
+    RAWLIST="$(printf '%s\n' "${new_rawlist[@]}")"
+  fi
+
   # generate formatted list for usage with "dialog"
   for i in $RAWLIST; do
     TEMPVAR="$i"
@@ -550,7 +564,7 @@ create_config() {
     local LIMIT=2096128
     local THREE_TB=2861588
     local DRIVE_SIZE; DRIVE_SIZE="$(sfdisk -s "$(smallest_hd)" 2>/dev/null)"
-    DRIVE_SIZE="$(echo "$DRIVE_SIZE" / 1024 | bc)"
+    DRIVE_SIZE="$(echo "$DRIVE_SIZE" / 1024 | bc)" # MiB
 
     # adjust swap dynamically according to RAM
     # RAM < 2 GB : SWAP=2 * RAM
@@ -567,6 +581,12 @@ create_config() {
       SWAPSIZE=$((RAM / 1024 + 1))
     elif [ "$RAM" -lt 65535 ]; then
       SWAPSIZE=$((RAM / 2 / 1024 + 1))
+    fi
+
+    # revert swap size to 4G if swap wouldnt fit into smallest disk
+    DRIVE_SIZE_GIB=$((DRIVE_SIZE / 1024))
+    if (( SWAPSIZE >= DRIVE_SIZE_GIB )); then
+      SWAPSIZE=4
     fi
 
     ESPPART='PART /boot/efi esp 256M\n'
@@ -1018,7 +1038,7 @@ validate_vars() {
     graph_error "ERROR: CentOS 6 is EOL since Nov 2020 and installimage does not support CentOS 6 anymore"
     return 1
   fi
-  if (( UEFI == 1 )) && rhel_9_based_image; then
+  if (( UEFI == 1 )) && rhel_9_based_image && test -z "$RHEL9_UEFI_OVERRIDE" ; then
     graph_error "ERROR: we do not yet support $IAM $IMG_VERSION on EFI systems"
     return 1
   fi
@@ -2200,8 +2220,11 @@ make_fstab_entry() {
   if grep -q '^/dev/disk/by-' <<< "$1"; then
     p='-part'
   else
-    p="$(echo $1 | grep nvme)"
-    [ -n "$p" ] && p='p'
+    local p; p=""
+    local nvme; nvme="$(echo $1 | grep nvme)"
+    [ -n "$nvme" ] && p='p'
+    local disk_by; disk_by="$(echo $1 | grep '^/dev/disk/by-')"
+    [ -n "$disk_by" ] && p='-part'
   fi
 
   if [ "$4" = "swap" ] ; then
@@ -2323,10 +2346,10 @@ make_swraid() {
         continue
       elif [ -n "$(echo "$line" | grep "/boot")" -a  "$metadata_boot" == "--metadata=0.90" ] || [ "$metadata" == "--metadata=0.90" ]; then
         # update fstab - replace /dev/sdaX with /dev/mdY
-        echo $line | sed "s/$SEDHDD\(p\)\?[0-9]\+/\/dev\/md$md_count/g" >> $fstab
+        echo $line | sed "s/$SEDHDD\(p\|-part\)\?[0-9]\+/\/dev\/md$md_count/g" >> $fstab
       else
         # update fstab - replace /dev/sdaX with /dev/md/Y
-        echo $line | sed "s/$SEDHDD\(p\)\?[0-9]\+/\/dev\/md\/$md_count/g" >> $fstab
+        echo $line | sed "s/$SEDHDD\(p\|-part\)\?[0-9]\+/\/dev\/md\/$md_count/g" >> $fstab
       fi
 
       # create raid array
@@ -2337,8 +2360,12 @@ make_swraid() {
         local n=0
         for n in $(seq 1 $COUNT_DRIVES) ; do
           TARGETDISK="$(eval echo \$DRIVE${n})"
-          local p="$(echo $TARGETDISK | grep nvme)"
-          [ -n "$p" ] && p='p'
+          local p; p=""
+          local nvme; nvme="$(echo $TARGETDISK | grep nvme)"
+          [ -n "$nvme" ] && p='p'
+          local disk_by; disk_by="$(echo $TARGETDISK | grep '^/dev/disk/by-')"
+          [ -n "$disk_by" ] && p='-part'
+
           components="$components $TARGETDISK$p$PARTNUM"
         done
 
@@ -2390,8 +2417,11 @@ make_lvm() {
   if [ -n "$1" ] ; then
     local fstab=$1
     local disk=$DRIVE1
-    local p; p="$(echo "$disk" | grep nvme)"
-    [ -n "$p" ] && p='p'
+    local p; p=""
+    local nvme; nvme="$(echo $TARGETDISK | grep nvme)"
+    [ -n "$nvme" ] && p='p'
+    local disk_by; disk_by="$(echo $TARGETDISK | grep '^/dev/disk/by-')"
+    [ -n "$disk_by" ] && p='-part'
 
     # TODO: needs to be removed
     # get device names for PVs depending if we use swraid or not
@@ -2421,7 +2451,7 @@ make_lvm() {
     # remove all Physical Volumes
     debug "# Removing all Physical Volumes"
     while read -r pv vg; do
-      if [[ "$vg" =~ $PRESERVE_VG ]]; then
+      if [[ -n "$PRESERVE_VG" ]] && [[ "$vg" =~ $PRESERVE_VG ]]; then
         debug "Not removing VG $vg"
       else
         pvremove -ff "$pv" 2>&1 | debugoutput
@@ -3850,7 +3880,8 @@ exit_function() {
   echo "  https://robot.hetzner.com/"
   echo
 
-  report_install
+  report_install_old
+  report_install_new
 }
 
 #function to check if it is a intel or amd cpu
@@ -3981,8 +4012,13 @@ function hdinfo() {
     *)
       local smartctl_json model_name serial_number
       if ! smartctl_json="$(smartctl -i -j "$dev" 2> /dev/null)"; then
-        echo '# unknown'
-        return
+        if is_usb_disk "$dev"; then
+          echo '# USB disk'
+          return
+        else
+          echo '# unknown'
+          return
+        fi
       fi
       model_name="$(jq -r '.model_name // empty' <<< "$smartctl_json" 2> /dev/null)" || :
       serial_number="$(disk_serial "$dev")" || :
