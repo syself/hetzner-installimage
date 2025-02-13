@@ -27,19 +27,19 @@ jobs:
             echo "tag=${GITHUB_REF#refs/*/}" >> $GITHUB_OUTPUT
           fi
 
-      - name: create a .tgz file 
+      - name: create a .tgz file
         run: |
           tar  --exclude .git -C .. -czf /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz hetzner-installimage
 
       - name: upload artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           path: /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz
 
 
-      - name: upload release assets 
+      - name: upload release assets
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           gh release create ${{ steps.tag.outputs.tag }} -t ${{ steps.tag.outputs.tag }} -n ""
-          gh release upload ${{ steps.tag.outputs.tag }}  /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz 
+          gh release upload ${{ steps.tag.outputs.tag }}  /tmp/hetzner-installimage-${{ steps.tag.outputs.tag }}.tgz
