@@ -1,8 +1,8 @@
 #!/bin/bash
 #
-# RHEL specific functions
+# RedHat specific functions
 #
-# (c) 2008-2021, Hetzner Online GmbH
+# (c) 2021, Hetzner Online GmbH
 #
 
 # generate_config_mdadm "NIL"
@@ -57,7 +57,7 @@ generate_config_grub() {
   rm -f "${FOLD}/hdd/boot/grub2/device.map"
   build_device_map 'grub2'
 
-  if [[ "$IMG_VERSION" -gt 93 ]] && [[ "$IMG_VERSION" -lt 810 ]]; then
+  if { { [ "$IMG_VERSION" -gt 93 ] && [ "$IMG_VERSION" -lt 810 ]; } || [ "$IMG_VERSION" -ge 1000 ]; }; then
     grub_cmdline_linux+=' crashkernel=1G-4G:192M,4G-64G:256M,64G-:512M'
   else
     grub_cmdline_linux+=' crashkernel=auto'
@@ -84,27 +84,42 @@ generate_config_grub() {
 
   sed -i "s/GRUB_CMDLINE_LINUX=.*/GRUB_CMDLINE_LINUX=\"${grub_cmdline_linux}\"/" "$grubdefconf"
 
+  if { { [ "$IMG_VERSION" -gt 85 ] && [ "$IMG_VERSION" -lt 90 ]; } || [ "$IMG_VERSION" -ge 810 ]; } && [ -z "$GRUB_DEFAULT_OVERRIDE" ]; then
+    GRUB_DEFAULT_OVERRIDE='saved'
+  fi
+
+
   # set $GRUB_DEFAULT_OVERRIDE to specify custom GRUB_DEFAULT Value ( https://www.gnu.org/software/grub/manual/grub/grub.html#Simple-configuration )
   [[ -n "$GRUB_DEFAULT_OVERRIDE" ]] && sed -i "s/^GRUB_DEFAULT=.*/GRUB_DEFAULT=${GRUB_DEFAULT_OVERRIDE}/" "$grubdefconf"
 
   # Generate grub.cfg
-  if [[ "$IMG_VERSION" -gt 93 ]] && [[ "$IMG_VERSION" -lt 810 ]]; then
+  if { { [ "$IMG_VERSION" -gt 93 ] && [ "$IMG_VERSION" -lt 810 ]; } || [ "$IMG_VERSION" -ge 1000 ]; }; then
     # https://docs.rockylinux.org/en/latest/reference/grub2/grub2-mkconfig/
-    execute_chroot_command 'grub2-mkconfig -o /boot/grub2/grub.cfg --update-bls-cmdline 2>&1'
+    execute_chroot_command 'grub2-mkconfig -o /boot/grub2/grub.cfg --update-bls-cmdline 2>&1'; exitcode=$?
+    grub2_uuid_bugfix 'rhel'
   else
-    execute_chroot_command 'grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1'
+    if [ "$UEFI" -eq 1 ]; then
+      execute_chroot_command "grub2-mkconfig -o /boot/efi/EFI/rhel/grub.cfg 2>&1"; exitcode=$?
+    else
+      execute_chroot_command "grub2-mkconfig -o /boot/grub2/grub.cfg 2>&1"; exitcode=$?
+    fi
+    uuid_bugfix
   fi
-  exitcode=$?
 
-  grub2_uuid_bugfix 'rhel'
   return "$exitcode"
 }
 
 write_grub() {
   local exitcode
   if [[ "$UEFI" -eq 1 ]]; then
-    execute_chroot_command "grub2-install --target=${SYSARCH}-efi --efi-directory=/boot/efi/ --bootloader-id=${IAM} --force --removable --no-nvram 2>&1"
-    exitcode=$?
+    if { { [ "$IMG_VERSION" -gt 85 ] && [ "$IMG_VERSION" -lt 90 ]; } || { [ "$IMG_VERSION" -ge 810 ] && [ "$IMG_VERSION" -lt 1000 ]; } }; then
+      rm -f "${FOLD}/hdd/boot/grub2/grubenv"
+      execute_chroot_command "ln -s /boot/efi/EFI/rhel/grubenv /boot/grub2/grubenv"
+      exitcode=$?
+    else
+      execute_chroot_command "grub2-install --target=${SYSARCH}-efi --efi-directory=/boot/efi/ --bootloader-id=${IAM} --force --removable --no-nvram 2>&1"
+      exitcode=$?
+    fi
   else
     # Only install grub2 in MBR of all other drives if we use SWRAID
     for ((i = 1; i <= COUNT_DRIVES; i++)); do

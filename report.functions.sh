@@ -24,7 +24,7 @@ report_install() {
 
   local bootif_mac
 
-  [[ " $(< /proc/cmdline)" =~ \ BOOTIF=01-([0-9a-f-]+) ]];
+  [[ " $(< /proc/cmdline)" =~ \ BOOTIF=01-([0-9a-f:-]+) ]];
 
   bootif_mac="${BASH_REMATCH[1]//-/:}"
 

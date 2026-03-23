@@ -18,7 +18,6 @@ case $1 in
   hsa-sql)              exec "$0" -c hsa-sql -x hsa-sql ;;
 esac
 
-
 clear
 wd=$(pwd)
 export wd

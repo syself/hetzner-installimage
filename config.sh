@@ -73,6 +73,9 @@ export OSMENULIST=(
   "Ubuntu"        "(Official)"
   "Arch Linux"    "(Official)"
 )
+if (($(find "$IMAGESPATH" -type f -iname '*opensuse*' -printf '.' | wc -c) > 0)); then
+  export OSMENULIST+=("openSUSE" "(Official)")
+fi
 if (($(find "$IMAGESPATH" -type f -iname '*centos*stream*' -printf '.' | wc -c) > 0)); then
   export OSMENULIST+=("CentOS Stream" "(Official)")
 fi
@@ -95,7 +98,7 @@ export CPANEL_INSTALLER_SRC=http://mirror.hetzner.com/tools/cpanelinc/cpanel
 
 export PLESK_INSTALLER_SRC=http://mirror.hetzner.com/tools/parallels/plesk
 export PLESK_MIRROR=http://mirror.hetzner.com/plesk
-export PLESK_STD_VERSION=PLESK_18_0_62
+export PLESK_STD_VERSION=PLESK_18_0_69
 export PLESK_DOWNLOAD_RETRY_COUNT=999
 export PLESK_COMPONENTS=(
   awstats

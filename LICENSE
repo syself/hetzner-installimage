@@ -1,4 +1,4 @@
-Copyright (c) 2007-2024, Hetzner Online GmbH
+Copyright (c) 2007-2025, Hetzner Online GmbH
 
 The scripts were written by developers of Hetzner Online GmbH and are
 maintained and extended by them. The scripts are written in bash and are
@@ -13,6 +13,7 @@ Installimage was originally written by
 and extended by:
 * Jonas Keidel
 * Markus Schade
+* Vincent Roch
 * Matthias Übler
 
 Contributions by external developers:

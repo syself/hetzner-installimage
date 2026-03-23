@@ -154,6 +154,7 @@ use_predictable_network_interface_names() {
   [[ "$IAM" == 'rockylinux' ]] && return
   [[ "$IAM" == 'almalinux' ]] && return
   [[ "$IAM" == 'rhel' ]] && return
+  [[ "$IAM" == 'suse' ]] && return
   return 1
 }
 
@@ -209,11 +210,12 @@ predict_network_interface_name() {
 
   [[ -n "$predicted_name" ]] || return 1
 
-  if [[ "$network_interface_driver" == 'i40e' ]] && ! image_i40e_driver_exposes_port_name && [[ -e "/sys/class/net/$network_interface/phys_port_name" ]]; then
+  if { [[ "$network_interface_driver" == 'i40e' ]] && ! image_i40e_driver_exposes_port_name && [[ -e "/sys/class/net/$network_interface/phys_port_name" ]]; } ||
+    { [[ "$network_interface_driver" == 'ice' ]] && ! image_ice_driver_exposes_port_name && [[ -e "/sys/class/net/$network_interface/phys_port_name" ]]; }; then
     local phys_port_name; phys_port_name="$(< "/sys/class/net/$network_interface/phys_port_name")"
     local stripped_name="${predicted_name%n$phys_port_name}"
     if [[ "$predicted_name" != "$stripped_name" ]]; then
-      debug "# image i40e driver does not expose port name. removed phys port suffix n$phys_port_name from predicted netif name $predicted_name"
+      debug "# image $network_interface_driver driver does not expose port name. removed phys port suffix n$phys_port_name from predicted netif name $predicted_name"
     fi
     predicted_name="$stripped_name"
   fi
@@ -432,9 +434,7 @@ gen_ifcfg_script_suse() {
 
   echo "configuring ipv6 addr ${ipv6_addrs[0]} for $predicted_network_interface_name" >&2
   echo
-  echo -n 'IPADDR'
-  ((${#ipv4_addrs[@]} > 0)) && echo -n '_0'
-  echo "=\"${ipv6_addrs[0]}\""
+  echo "IPADDR6=${ipv6_addrs[0]}"
 }
 
 # gen ifroute script
@@ -467,10 +467,14 @@ gen_routes_script() {
 
 # setup /etc/sysconfig/network scripts for suse
 setup_etc_sysconfig_network_scripts_suse() {
+  debug '# deactivate legacy interface naming'
+  mkdir -p ${FOLD}/hdd/etc/udev/rules.d
+  touch ${FOLD}/hdd/etc/udev/rules.d/75-persistent-net-generator.rules
+
   debug '# setup /etc/sysconfig/network scripts'
 
   # clean up /etc/sysconfig/network
-  find "$FOLD/hdd/etc/sysconfig/network" -type f \( -name 'ifcfg-*' -or -name 'ifroute-*' -or -name 'routes' \) -and -not -name 'ifcfg-lo' -delete
+  find "${FOLD}/hdd/etc/sysconfig/network" -type f \( -name 'ifcfg-*' -or -name 'ifroute-*' -or -name 'routes' \) -and -not -name 'ifcfg-lo' -delete
 
   while read network_interface; do
     local ipv4_addrs=($(network_interface_ipv4_addrs "$network_interface"))
@@ -481,7 +485,7 @@ setup_etc_sysconfig_network_scripts_suse() {
     local ifcfg_script="/etc/sysconfig/network/ifcfg-$predicted_network_interface_name"
 
     debug "# setting up $ifcfg_script"
-    gen_ifcfg_script_suse "$network_interface" > "$FOLD/hdd/$ifcfg_script" 2> >(debugoutput)
+    gen_ifcfg_script_suse "$network_interface" > "${FOLD}/hdd/$ifcfg_script" 2> >(debugoutput)
 
     # local route_script="/etc/sysconfig/network/ifroute-$predicted_network_interface_name"
     local routes_script="/etc/sysconfig/network/routes"
@@ -489,7 +493,7 @@ setup_etc_sysconfig_network_scripts_suse() {
     # debug "# setting up $route_script"
     # gen_ifroute_script "$network_interface" > "$FOLD/hdd/$route_script" 2> >(debugoutput)
     debug "# setting up $routes_script"
-    gen_routes_script "$network_interface" > "$FOLD/hdd/$routes_script" 2> >(debugoutput)
+    gen_routes_script "$network_interface" > "${FOLD}/hdd/$routes_script" 2> >(debugoutput)
   done < <(physical_network_interfaces)
 }
 
@@ -583,7 +587,7 @@ setup_etc_network_interfaces() {
 # # disable predictable network interface names
 # disable_predictable_network_interface_names() {
 #   debug '# disabling predictable network interface names'
-# 
+#
 #   ln -s /dev/null "$FOLD/hdd/etc/systemd/network/99-default.link"
 # }
 
@@ -820,10 +824,18 @@ setup_network_config() {
   debug '# setup network config'
 
   case "$IAM" in
-    centos|rockylinux|almalinux|rhel)
+    centos)
+      if ((IMG_VERSION <= 90)); then
+        setup_etc_sysconfig_network
+        setup_etc_sysconfig_network_scripts_centos
+      fi
+      ;;
+    rockylinux|almalinux|rhel)
       setup_etc_sysconfig_network
-      setup_etc_sysconfig_network_scripts_centos
-    ;;
+      if ((IMG_VERSION < 1000)); then
+        setup_etc_sysconfig_network_scripts_centos
+      fi
+      ;;
     suse) setup_etc_sysconfig_network_scripts_suse;;
     debian) setup_etc_network_interfaces;;
     ubuntu)

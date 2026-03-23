@@ -108,6 +108,8 @@ generate_menu() {
     RAWLIST="$IMAGESPATH/archlinux-latest-64-minimal.tar.gz"
   elif [[ "$1" == 'CentOS Stream' ]]; then
     RAWLIST=$(find "$IMAGESPATH"/ -maxdepth 1 -type f -iname '*centos*stream*' -not -regex '.*\.sig$' -printf '%f\n')
+  elif [[ "$1" == 'openSUSE' ]]; then
+    RAWLIST=$(find "$IMAGESPATH"/ -maxdepth 1 -type f -iname '*opensuse*' -not -regex '.*\.sig$' -printf '%f\n')
   elif [[ "$1" == 'AlmaLinux' ]]; then
     RAWLIST=$(find "$IMAGESPATH"/ -maxdepth 1 -type f -iname '*alma*' -not -regex '.*\.sig$' -printf '%f\n')
   elif [[ "$1" == 'Rocky Linux' ]]; then
@@ -1034,11 +1036,6 @@ validate_vars() {
   fi
 
   whoami "$IMAGE_FILE"
-
-  if (( UEFI == 1 )) && rhel_8_based_image && test -z "$RHEL8_UEFI_OVERRIDE" ; then
-    graph_error "ERROR: we do not yet support $IAM $IMG_VERSION on EFI systems"
-    return 1
-  fi
 
   if [[ "$IMG_ARCH" == 'unknown' ]]; then
     graph_error "ERROR: can not determine image arch from filename"
@@ -2326,7 +2323,6 @@ make_swraid() {
         metadata_boot="--metadata=0.90"
       fi
     fi
-    [ "$IAM" == "suse" -a "$IMG_VERSION" -lt 123 ] && metadata="--metadata=0.90"
 
     while read line ; do
       PARTNUM="$(next_partnum $count)"
@@ -2672,6 +2668,8 @@ create_btrfs_subvolumes() {
             entries="$entries$entry"
           fi
         done
+        #Set default subvolume
+        btrfs subvolume set-default 256 "$tmp_mount"
         umount "$tmp_mount"
       fi
     done < "$fstab"
@@ -2975,26 +2973,39 @@ extract_image() {
 # $DNSRESOLVER in a random order.
 #
 generate_resolvconf() {
-  if [ "$IAM" = "suse" ] && [ "$IMG_VERSION" -ge 122 ]; then
-    # disable netconfig of DNS servers in YaST config file
+  if [ "$IAM" = "suse" ]; then
+
+    # use YaST config for the DNS resolvers
     sed -i -e \
-      "s/^NETCONFIG_DNS_POLICY=\".*\"/NETCONFIG_DNS_POLICY=\"\"/" \
-      "$FOLD/hdd/etc/sysconfig/network/config"
-  fi
+      "s/^NETCONFIG_DNS_POLICY=\".*\"/NETCONFIG_DNS_POLICY=\"auto\"/" \
+      "${FOLD}/hdd/etc/sysconfig/network/config"
+      # generate List of DNS Servers
+      # (netconfig only uses the first 3 configured servers, but we just set all in one row)
+    while read nsaddr; do
+      DNSRESOLVERLIST+=("$nsaddr")
+    done < <(randomized_nsaddrs)
+    # configure the DNS servers statically in /etc/sysconfig/network/config
+    sed -i -e \
+      "s/^NETCONFIG_DNS_STATIC_SERVERS=\".*\"/NETCONFIG_DNS_STATIC_SERVERS=\"${DNSRESOLVERLIST[*]}\"/" \
+      "${FOLD}/hdd/etc/sysconfig/network/config"
 
-  if [[ -L "$FOLD/hdd/etc/resolv.conf" ]]; then
-    DNSRESOLVERFILE="$FOLD/hdd/etc/resolvconf/resolv.conf.d/base"
   else
-    DNSRESOLVERFILE="$FOLD/hdd/etc/resolv.conf"
+
+    if [[ -L "${FOLD}/hdd/etc/resolv.conf" ]]; then
+      DNSRESOLVERFILE="${FOLD}/hdd/etc/resolvconf/resolv.conf.d/base"
+    else
+      DNSRESOLVERFILE="${FOLD}/hdd/etc/resolv.conf"
+    fi
+
+    echo -e "### ${COMPANY} installimage" > "$DNSRESOLVERFILE"
+    echo -e '# nameserver config' >> "$DNSRESOLVERFILE"
+    while read nsaddr; do
+      echo "nameserver ${nsaddr}" >> "$DNSRESOLVERFILE"
+    done < <(randomized_nsaddrs)
+
+    diff -Naur /dev/null "${FOLD}/hdd/etc/resolv.conf" | debugoutput
+
   fi
-
-  echo -e "### $COMPANY installimage" > $DNSRESOLVERFILE
-  echo -e "# nameserver config" >> $DNSRESOLVERFILE
-  while read nsaddr; do
-    echo "nameserver $nsaddr" >> "$DNSRESOLVERFILE"
-  done < <(randomized_nsaddrs)
-
-  diff -Naur /dev/null "$FOLD/hdd/etc/resolv.conf" | debugoutput
 
   return 0
 }
@@ -3762,6 +3773,8 @@ install_robot_report_script() {
       local link_service=1
     elif [[ "$IAM" == 'almalinux' ]]; then
       local link_service=1
+    elif [[ "$IAM" == 'suse' ]]; then
+      local link_service=1
     elif debian_buster_image; then
       local link_service=1
     elif debian_bullseye_image; then
@@ -3953,6 +3966,7 @@ function getHDDsNotInToleranceRange() {
 build_device_map() {
   local dmapfile="${FOLD}/hdd/boot/${1}/device.map"
   rm -f "$dmapfile"
+  touch "$dmapfile"
 
   for ((i = 1; i <= COUNT_DRIVES; i++)); do
     local j=$((i - 1))
@@ -4014,7 +4028,7 @@ grub2_uuid_bugfix() {
     fi
 
     [ -e "${FOLD}/hdd/boot/efi/EFI/${1}/grub.cfg" ] && sed -i "s|set prefix=.*|set prefix=(\$dev)/${boot_prefix}|" "${FOLD}/hdd/boot/efi/EFI/${1}/grub.cfg"
-    [ -e "${FOLD}/hdd/boot/efi/EFI/${1}/grub.cfg" ] && sed -i "s|search --no-floppy --fs-uuid --set=.*|search --no-floppy --fs-uuid --set=dev ${boot_uuid}|" "${FOLD}/hdd/boot/efi/EFI/${1}/grub.cfg"
+    [ -e "${FOLD}/hdd/boot/efi/EFI/${1}/grub.cfg" ] && sed -i -E "s|(search .* )(--set=.*)|\1--set=dev ${boot_uuid}|" "${FOLD}/hdd/boot/efi/EFI/${1}/grub.cfg"
   fi
   return 0
 }
