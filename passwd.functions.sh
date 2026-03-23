@@ -72,6 +72,8 @@ rescue_password_hashing_algo_supported_by_installed_os() {
     verify_machinectl_login_works "$random_password" && return
   elif [[ "$IAM" == debian ]] && ((IMG_VERSION >= 900)) && ((IMG_VERSION < 1000)); then
     verify_machinectl_login_works "$random_password" && return
+  elif [[ "$IAM" == archlinux ]]; then
+    verify_machinectl_login_works "$random_password" && return
   else
     execute_chroot_command_wo_debug "su nobody -s '$su_path'" <<< "$random_password" &> /dev/null && return
   fi
